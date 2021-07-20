@@ -129,22 +129,40 @@ func (d *digest) Size() int { return Size }
 func (d *digest) BlockSize() int { return BlockSize }
 
 func (d *digest) Write(p []byte) (nn int, err error) {
+	//获取写入字节数，更新d.len的值
 	nn = len(p)
 	d.len += uint64(nn)
+	//如果d.x中存有待处理的数据，将本次输入拷贝到d.x中，如果能凑够 BlockSize 则进行一轮迭代
 	if d.nx > 0 {
 		n := copy(d.x[d.nx:], p)
 		d.nx += n
 		if d.nx == chunk {
-			block(d, d.x[:])
+			//如果凑够一个分组就进行计算
+			block(d, d.x[:])	//block方法中会根据CPU参数判断执行汇编方法还是go方法
 			d.nx = 0
 		}
+		//更改偏移量，将写入d.x中的字节去掉
 		p = p[n:]
 	}
+
+	//如果 p 能凑够至少一个分组，就进行计算
 	if len(p) >= chunk {
 		n := len(p) &^ (chunk - 1)
-		block(d, p[:n])
+		/*
+		 * n := (len(p) / BlockSize) * BlockSize
+		 * 该方式和上面结果等价，作用是计算n的位置，n
+		 * 前的数据是 BlockSize 的整数倍，n到结尾的
+		 * 据是凑不够 BlockSize 大小的数据
+		 *
+		 * go源码中位运算的方式效率更高，但是需要的条
+		 * 是 BlockSize 必须是 2^n 这种形式
+		 */
+		block(d, p[:n])	//block方法中会根据CPU参数判断执行汇编方法还是go方法
+		//更改偏移量，将进行过计算的数据去掉
 		p = p[n:]
 	}
+
+	//最后凑不满的数据就会被写入d.x中等待下次调用时参与运算
 	if len(p) > 0 {
 		d.nx = copy(d.x[:], p)
 	}
@@ -189,6 +207,7 @@ func (d *digest) checkSum() [Size]byte {
 	return digest
 }
 
+//防止基于时间的侧信道攻击请使用 ConstantTimeSum，Golang自身 tls 计算 hmac-sha1使用的就是 ConstantTimeSum
 // ConstantTimeSum computes the same result of Sum() but in constant time
 func (d *digest) ConstantTimeSum(in []byte) []byte {
 	d0 := *d
