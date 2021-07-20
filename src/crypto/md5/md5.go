@@ -124,30 +124,51 @@ func (d *digest) Write(p []byte) (nn int, err error) {
 	// Note that we currently call block or blockGeneric
 	// directly (guarded using haveAsm) because this allows
 	// escape analysis to see that p and d don't escape.
+
+	//获取写入字节数，更新d.len的值
 	nn = len(p)
 	d.len += uint64(nn)
+
+	//如果d.x中存有待处理的数据，将本次输入拷贝到d.x中，如果能凑够 BlockSize 则进行一轮迭代
 	if d.nx > 0 {
 		n := copy(d.x[d.nx:], p)
 		d.nx += n
 		if d.nx == BlockSize {
+			//如果凑够一个分组就进行计算
 			if haveAsm {
-				block(d, d.x[:])
+				block(d, d.x[:])	//汇编实现迭代计算
 			} else {
-				blockGeneric(d, d.x[:])
+				blockGeneric(d, d.x[:])	//Go语言实现迭代计算
 			}
 			d.nx = 0
 		}
+		//更改偏移量，将写入d.x中的字节去掉
 		p = p[n:]
 	}
+
+	//如果 p 能凑够至少一个分组，就进行计算
 	if len(p) >= BlockSize {
 		n := len(p) &^ (BlockSize - 1)
+		/*
+		 * n := (len(p) / BlockSize) * BlockSize
+		 * 该方式和上面结果等价，作用是计算n的位置，n
+		 * 前的数据是 BlockSize 的整数倍，n到结尾的
+		 * 据是凑不够 BlockSize 大小的数据
+		 *
+		 * go源码中位运算的方式效率更高，但是需要的条
+		 * 是 BlockSize 必须是 2^n 这种形式
+		 */
 		if haveAsm {
 			block(d, p[:n])
 		} else {
 			blockGeneric(d, p[:n])
 		}
+
+		//更改偏移量，将进行过计算的数据去掉
 		p = p[n:]
 	}
+
+	//最后凑不满的数据就会被写入d.x中等待下次调用时参与运算
 	if len(p) > 0 {
 		d.nx = copy(d.x[:], p)
 	}
@@ -167,6 +188,12 @@ func (d *digest) checkSum() [Size]byte {
 	// 8 bytes representing the message length in bits.
 	//
 	// 1 byte end marker :: 0-63 padding bytes :: 8 byte length
+	/*
+		填充规则，头尾为固定长度`1+8`个字节，需要计算出中间`0`值的个数
+		- 1字节的结束标识，取值为`0x80`
+		- 0-63个字节的`0`值填充
+		- 8字节长度，保存待计算字符串的字节数
+	*/
 	tmp := [1 + 63 + 8]byte{0x80}
 	pad := (55 - d.len) % 64                             // calculate number of padding bytes
 	binary.LittleEndian.PutUint64(tmp[1+pad:], d.len<<3) // append length in bits
