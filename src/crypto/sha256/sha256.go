@@ -236,10 +236,11 @@ func (d *digest) checkSum() [Size]byte {
 	// Padding. Add a 1 bit and 0 bits until 56 bytes mod 64.
 	var tmp [64]byte
 	tmp[0] = 0x80
-	if len%64 < 56 {
-		d.Write(tmp[0 : 56-len%64])
-	} else {
-		d.Write(tmp[0 : 64+56-len%64])
+	//len%64 的取值范围是 0-63
+	if len%64 < 56 { //len%64 的取值范围是 0-55
+		d.Write(tmp[0 : 56-len%64])	//0:[1-56]		0-55个0
+	} else {//len%64 的取值范围是 56-63
+		d.Write(tmp[0 : 64+56-len%64])	//0:[57-64]	56-63个0
 	}
 
 	// Length in bits.
