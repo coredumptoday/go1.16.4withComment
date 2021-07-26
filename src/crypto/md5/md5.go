@@ -149,11 +149,24 @@ func (d *digest) Write(p []byte) (nn int, err error) {
 	//如果 p 能凑够至少一个分组，就进行计算
 	if len(p) >= BlockSize {
 		n := len(p) &^ (BlockSize - 1)
-		/*
-		 * n := (len(p) / BlockSize) * BlockSize
-		 * 该方式和上面结果等价，作用是计算n的位置，n
-		 * 前的数据是 BlockSize 的整数倍，n到结尾的
-		 * 据是凑不够 BlockSize 大小的数据
+		/* 等式解析
+		 * n := len(p) &^ (BlockSize - 1)
+		 * -> len(p) ^ (len(p) & (BlockSize - 1))
+		 * -> len(p) ^ (len(p) % BlockSize)
+		 *
+		 * 计算过程解析
+		 * 已知 BlockSize = 64，二进制表示为 0000000001000000
+		 * len(p) % 64，取值范围是 0 ~ 63，
+		 * 二进制会落在 0000000001[000000] 低位的六个 0 的范围内
+		 * 所以      xxxxxxxxxxxxxxxx  -> len(p)
+		 *        % 0000000001000000  -> BlockSize
+		 * 可以转换为 xxxxxxxxxxxxxxxx  -> len(p)
+		 *        & 0000000000111111  -> BlockSize - 1
+		 *        --------------------
+		 *    结果   0000000000xxxxxx  -> len(p) & (BlockSize - 1)
+		 *        ^ xxxxxxxxxxxxxxxx  -> len(p)
+		 *        --------------------
+		 *    结果   xxxxxxxxxx000000   n = len(p)中BlockSize的最大整数倍
 		 *
 		 * go源码中位运算的方式效率更高，但是需要的条
 		 * 是 BlockSize 必须是 2^n 这种形式
@@ -197,12 +210,11 @@ func (d *digest) checkSum() [Size]byte {
 
 	//tmp数组第 0 个位置为 0x80，其他位置均为 0 值，0x80是超出ASCII范围的第一个值
 	tmp := [1 + 63 + 8]byte{0x80}
-	// 计算pad的值，这段比较不好理解，可以参考sha1或者sha256相应的写法
-	// 分两种情况讨论 d.len <= 55 比较好理解，不做解释
-	// 当 d.len > 55 时，计算为负数，由于 d.len 是uint64，相减结果只能为正数，这样就演变成借位减法
-	// 55 - d.len < 0 时 代码演变为 (2^64 + 55 - d.len) % 64
-	// 只要 2^n + 55 >= d.len，n就成立，n=64是因为uint64的原因
+	// 计算pad的值，这段比较不好理解，
+	// 可以参考sha1或者sha256相应的写法，比这种写法容易理解
 	pad := (55 - d.len) % 64                             // calculate number of padding bytes
+	// 分两种情况讨论 d.len <= 55 比较好理解，不做解释
+	// 当 d.len > 55 时，计算为负数，这时候内存中为补码形式，又因为 d.len 为 uint64 这时候就会变成一个极大的正数，其实我们最关心的是低六位的数值，其他的不用考虑
 	binary.LittleEndian.PutUint64(tmp[1+pad:], d.len<<3) // append length in bits
 	// 1 << 3 = 8 => d.len << 3 == d.len * 8 => 输入数据的比特位数量
 	d.Write(tmp[:1+pad+8])
